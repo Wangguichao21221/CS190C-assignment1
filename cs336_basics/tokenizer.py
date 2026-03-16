@@ -50,16 +50,32 @@ class Tokenizer:
   def __init__(self,vocab: dict[int:bytes] ,merges :list[tuple[bytes,bytes]],special_tokens:list[str]=None):
     self.vocab = vocab
     self.merges = merges
-    self.special_tokens = [token.encode(encoding='utf-8') for token in special_tokens]
+    if special_tokens:
+      self.special_tokens = [token.encode(encoding='utf-8') for token in special_tokens]
+    else:
+      self.special_tokens = []
     special_tokens_to_append = []
-    for index,bytes in self.vocab.items():
-      if bytes not in self.special_tokens:
+    for bytes in self.special_tokens:
+      if bytes not in self.vocab:
         special_tokens_to_append.append(bytes)
     length = len(vocab)
     for token in special_tokens_to_append:
        self.vocab[length] = token
        length+=1
-    self.bytes2index = {token:index for index,token in self.vocab.items()}
+    self.bytes2index = {token:k for k,token in self.vocab.items()}
+    # i = 0
+    # for k,v in self.vocab.items():
+    #   print(f'k:{k},v:{v}')
+    #   i+=1
+    #   if i>10:
+    #     break
+    # i = 0
+    # for k,v in self.bytes2index.items():
+    #   print(f'k:{k},v:{v}')
+    #   i+=1
+    #   if i>10:
+    #     break
+    
   def from_files(cls, vocab_filepath,merges_filepath,special_tokens=None):
     gpt2_byte_decoder = {v: k for k, v in gpt2_bytes_to_unicode().items()}
     with open(vocab_filepath) as vocab_f:
@@ -116,7 +132,8 @@ class Tokenizer:
     
     return pretokens
   def merge(self, token:bytes):
-     bytes_to_merge = [bt for bt in token]
+     bytes_to_merge = [bytes([bt]) for bt in token]
+    #  print(bytes_to_merge)
      for i in range(len(bytes_to_merge)):
         if i == len(bytes_to_merge)-1:
            return bytes_to_merge
@@ -124,7 +141,8 @@ class Tokenizer:
         if (bytes_to_merge[i],bytes_to_merge[j]) in self.merges:
           bytes_to_merge[i] = bytes_to_merge[i]+bytes_to_merge[j]
           bytes_to_merge.pop(j)
-          break
+          continue
+     return bytes_to_merge
 
   def encode(self, text: str)-> list[int]:
     pretokens = self.pretokenize(text)
@@ -133,11 +151,16 @@ class Tokenizer:
     list_of_indexes = []
     for pretoken in pretokens:
       list_of_bytes.extend(self.merge(pretoken))
+    # print(pretokens)
+    # print(list_of_bytes)
     for bts in list_of_bytes:
       if bts in self.bytes2index:
         list_of_indexes.append(self.bytes2index[bts])
       else:
          print("Error! not found in vocab!")
+        #  print(pretokens)
+        #  print(bts)
+        #  print(list_of_bytes)
     return list_of_indexes
   def encode_iterable(self,iterable):
     pass
