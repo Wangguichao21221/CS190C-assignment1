@@ -56,13 +56,14 @@ class Tokenizer:
       self.special_tokens = []
     special_tokens_to_append = []
     for bytes in self.special_tokens:
-      if bytes not in self.vocab:
+      if bytes not in self.vocab.values():
         special_tokens_to_append.append(bytes)
     length = len(vocab)
     for token in special_tokens_to_append:
        self.vocab[length] = token
        length+=1
     self.bytes2index = {token:k for k,token in self.vocab.items()}
+    self.merge_rank = {pair: rank for rank, pair in enumerate(self.merges)}
     # i = 0
     # for k,v in self.vocab.items():
     #   print(f'k:{k},v:{v}')
@@ -111,47 +112,61 @@ class Tokenizer:
   def pretokenize(self,text:str) -> list[bytes]:
     text = text.encode(encoding='utf-8')
     PAT = rb"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-    
+
     if not self.special_tokens:
-        pretokens = []
-        for match in re.finditer(PAT, text):
-            token = match.group()
-            pretokens.append(token)
-        return pretokens
-    
+      pretokens = []
+      for match in re.finditer(PAT, text):
+        pretokens.append(match.group())
+      return pretokens
+
     pretokens = []
     escaped_tokens = [re.escape(token) for token in sorted(self.special_tokens, key=len, reverse=True)]
-    special_pattern = b'|'.join(escaped_tokens)
-    
+    special_pattern = rb'(?:' + b'|'.join(escaped_tokens) + rb')'
 
-    combined_pattern = rb'(?:' + special_pattern + rb')|' + PAT
-    
-    for match in re.finditer(combined_pattern, text):
-        token = match.group()
-        pretokens.append(token)
-    
+    # First carve out exact special-token spans, then pretokenize the rest.
+    last_end = 0
+    for special_match in re.finditer(special_pattern, text):
+      non_special_chunk = text[last_end:special_match.start()]
+      for match in re.finditer(PAT, non_special_chunk):
+        pretokens.append(match.group())
+      pretokens.append(special_match.group())
+      last_end = special_match.end()
+
+    tail_chunk = text[last_end:]
+    for match in re.finditer(PAT, tail_chunk):
+      pretokens.append(match.group())
+
     return pretokens
-  def merge(self, token:bytes):
-     bytes_to_merge = [bytes([bt]) for bt in token]
-    #  print(bytes_to_merge)
-     for i in range(len(bytes_to_merge)):
-        if i == len(bytes_to_merge)-1:
-           return bytes_to_merge
-        j = i+1
-        if (bytes_to_merge[i],bytes_to_merge[j]) in self.merges:
-          bytes_to_merge[i] = bytes_to_merge[i]+bytes_to_merge[j]
-          bytes_to_merge.pop(j)
-          continue
-     return bytes_to_merge
+  def merge(self, token: bytes):
+    # print(f"Merging:{token}")
+    parts = [bytes([bt]) for bt in token]
+    while len(parts) > 1:
+      best_rank = float('inf')
+      best_idx = -1
+      for i in range(len(parts) - 1):
+        rank = self.merge_rank.get((parts[i], parts[i+1]), float('inf'))
+        if rank < best_rank:
+          best_rank = rank
+          best_idx = i
+      if best_idx == -1:
+        break
+      parts[best_idx] = parts[best_idx] + parts[best_idx + 1]
+      parts.pop(best_idx + 1)
+    # print(f"final tokens:{parts}")
+    return parts
 
   def encode(self, text: str)-> list[int]:
+  
     pretokens = self.pretokenize(text)
+    # print(f"pretokens:{pretokens}")
     final = []
     list_of_bytes = []
     list_of_indexes = []
     for pretoken in pretokens:
-      list_of_bytes.extend(self.merge(pretoken))
-    # print(pretokens)
+      if pretoken in self.special_tokens:
+        list_of_bytes.append(pretoken)
+      else:
+        list_of_bytes.extend(self.merge(pretoken))
     # print(list_of_bytes)
     for bts in list_of_bytes:
       if bts in self.bytes2index:
@@ -162,10 +177,11 @@ class Tokenizer:
         #  print(bts)
         #  print(list_of_bytes)
     return list_of_indexes
-  def encode_iterable(self,iterable):
-    pass
+  def encode_iterable(self, iterable):
+    for chunk in iterable:
+      for token_id in self.encode(chunk):
+        yield token_id
   def decode(self, token_ids: list[int]) -> str:
-      """将 token IDs 序列解码为文本"""
       if not token_ids:
           return ""
         
