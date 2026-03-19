@@ -8,7 +8,7 @@ import numpy.typing as npt
 import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
-import cs336_basics.bpe, cs336_basics.tokenizer
+import cs336_basics.bpe, cs336_basics.tokenizer, cs336_basics.utils
 
 def run_linear(
     d_in: int,
@@ -29,7 +29,9 @@ def run_linear(
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
 
-    raise NotImplementedError
+    linear = cs336_basics.utils.Linear(d_in,d_out)
+    linear.change_weights(weights)
+    return linear(in_features)
 
 
 def run_embedding(
@@ -50,8 +52,9 @@ def run_embedding(
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
-
-    raise NotImplementedError
+    embedding = cs336_basics.utils.Embedding(vocab_size,d_model)
+    embedding.change_weights(weights)
+    return embedding(token_ids)
 
 
 def run_swiglu(
@@ -83,7 +86,9 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    swiglu = cs336_basics.utils.SwiGLU(d_model,d_ff)
+    swiglu.change_weights(w1_weight,w2_weight,w3_weight)
+    return swiglu(in_features)
 
 
 def run_scaled_dot_product_attention(
@@ -200,7 +205,8 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
-    raise NotImplementedError
+    rope = cs336_basics.utils.RoPE(d_k=d_k,max_seq_len=max_seq_len,theta=theta)
+    return rope(in_query_or_key,token_positions)
 
 
 def run_transformer_block(
@@ -378,8 +384,9 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    raise NotImplementedError
-
+    rmsnorm = cs336_basics.utils.RMSNorm(d_model,eps)
+    rmsnorm.change_weights(weights)
+    return rmsnorm(in_features)
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
     """Given a tensor of inputs, return the output of applying SiLU
@@ -392,7 +399,7 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
         Float[Tensor,"..."]: of with the same shape as `in_features` with the output of applying
         SiLU to each element.
     """
-    raise NotImplementedError
+    raise cs336_basics.utils.SiLU(in_features)
 
 
 def run_get_batch(
@@ -431,7 +438,7 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
         softmax normalizing the specified `dim`.
     """
-    raise NotImplementedError
+    return cs336_basics.utils.softmax(in_features, dim)
 
 
 def run_cross_entropy(
