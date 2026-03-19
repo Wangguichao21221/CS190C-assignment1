@@ -109,8 +109,8 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    raise NotImplementedError
 
+    return cs336_basics.utils.scaled_dot_product_attention(Q, K, V, mask)
 
 def run_multihead_self_attention(
     d_model: int,
@@ -143,7 +143,9 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    MHA = cs336_basics.utils.Multihead_Self_Attention(d_model=d_model, num_heads= num_heads)
+    MHA.change_weights(q_proj_weight,k_proj_weight,v_proj_weight,o_proj_weight)
+    return MHA(in_features)
 
 
 def run_multihead_self_attention_with_rope(

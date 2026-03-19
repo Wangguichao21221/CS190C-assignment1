@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch
 import math
+from jaxtyping import Bool, Float, Int
 class Linear(nn.Module):
   def __init__(self, in_features, out_features, device=None, dtype=None):
     """
@@ -116,3 +117,62 @@ class RoPE(nn.Module):
     stacked_x = torch.stack([x_rotated_even, x_rotated_odd], dim=-1)
     x_rotated = stacked_x.reshape(*stacked_x.shape[:-2], self.d_k)
     return x_rotated
+def scaled_dot_product_attention(
+    Q: Float[torch.Tensor, " ... queries d_k"],
+    K: Float[torch.Tensor, " ... keys d_k"],
+    V: Float[torch.Tensor, " ... values d_v"],
+    mask: Bool[torch.Tensor, " ... queries keys"] | None = None,):
+  """
+  Q:(batch_size, ..., seq_len_q, d_k)
+  K:(batch_size, ..., seq_len_k, d_k)
+  V:(batch_size, ..., seq_len_k, d_v)
+  mask:(seq_len_q, seq_len_k)
+  """
+  d_k = Q.shape[-1]
+  QKT = Q @ K.transpose(-1, -2)
+  attention_scores = QKT / math.sqrt(d_k)  
+  
+  if mask is not None:
+      mask = mask.reshape_as(attention_scores)
+      mask = torch.where(
+          mask,
+          torch.tensor(0.0, device=Q.device),
+          torch.tensor(float('-inf'), device=Q.device)  
+      )
+      attention_scores = attention_scores + mask
+
+  attention_weights = softmax(attention_scores, dim=-1)
+  output = attention_weights @ V
+  
+  return output
+class Multihead_Self_Attention(nn.Module):
+  def __init__(self,d_model,num_heads,max_seq_length:int=None,theta:int=None,device=None):
+    super().__init__()
+    self.d_model = d_model
+    self.num_heads = num_heads
+    self.d_k = d_model/num_heads
+    self.d_v = d_model/num_heads
+    self.max_seq_length = max_seq_length
+    self.theta = theta
+    self.token_positons = None
+    self.Q_proj = Linear(d_model,self.d_k*self.num_heads,device=device)
+    self.K_proj = Linear(d_model,self.d_k*self.num_heads,device=device)
+    self.V_proj = Linear(d_model,self.d_v*self.num_heads,device=device)
+    self.O_proj = Linear(self.d_v*self.num_heads,d_model,device=device)
+    self.attention_func = scaled_dot_product_attention()
+    if max_seq_length is not None and self.theta is not None:
+      self.rope = RoPE(theta=theta,d_k=self.d_k,max_seq_len=max_seq_length,device=device)
+    else:
+      self.rope = None
+  def forward(self,x:torch.Tensor,token_positons:torch.Tensor = None):
+    batch_size = x.shape[0]
+    seq_len = x.shape[1]
+    Q= self.Q_proj(x)
+    Q=Q.reshape(batch_size,seq_len,self.num_heads,self.d_k).transpose(1,2)
+    K= self.K_proj(x)
+    K=K.reshape(batch_size,seq_len,self.num_heads,self.d_k).transpose(1,2)
+    V= self.V_proj(x)
+    V=V.reshape(batch_size,seq_len,self.num_heads,self.d_v).transpose(1,2)
+    if self.rope is not None:
+      self.token_positons = token_positons
+      Q= self.rope(Q,self.token_positons)
