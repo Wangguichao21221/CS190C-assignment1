@@ -107,8 +107,6 @@ class RoPE(nn.Module):
     """
     Process an input tensor of shape (...,seq_len,d_k) and return a tensor of the same shape.
     """
-    print(f"RoPE input shape: {x.shape}")
-    print(f"RoPE token positions shape: {token_positions.shape}")
     x_splited = x.reshape(*x.shape[:-1], self.d_k//2, 2)
     cos_chunk = self.cos_table[:, token_positions, :]
     sin_chunk = self.sin_table[:, token_positions, :]

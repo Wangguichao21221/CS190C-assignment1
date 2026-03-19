@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
-from cs336_basics.utils import Multihead_Self_Attention, RMSNorm, SwiGLU
-
+from cs336_basics.utils import Multihead_Self_Attention, RMSNorm, SwiGLU, Embedding, Linear
 class TransformerBlock(nn.Module):
     def __init__(self,d_model,num_heads,d_ff,theta,max_seq_length,device =None,dtype = None):
         super().__init__()
@@ -43,17 +42,64 @@ class TransformerBlock(nn.Module):
             FFN_W3.to(device)
         )
 class TransformerLM(nn.Module):
-    def __init__(self,vocab_size: int,
-                    context_length: int,
-                    d_model: int,
-                    num_layers: int,
-                    num_heads: int,
-                    d_ff: int,
-                    rope_theta: float,
-                    weights: dict[str, torch.Tensor],
-                    device = None,
-                    dtype = None):
+    def __init__(self,
+                vocab_size: int,
+                max_seq_length: int,
+                d_model: int,
+                num_layers: int,
+                num_heads: int,
+                d_ff: int,
+                rope_theta: float,
+                device = None,
+                dtype = None):
         super().__init__()
-        # TODO
-    def forward(self,in_indices:torch.Tensor):
-        pass
+        self.num_vocab = vocab_size
+        self.max_seq_length = max_seq_length
+        self.d_model = d_model
+        self.num_layers = num_layers
+        self.num_heads =  num_heads
+        self.d_ff = d_ff
+        self.rope_theta = rope_theta
+        self.device = device
+        self.dtype = dtype
+        self.embedding = Embedding(vocab_size,d_model,device=device, dtype=dtype)
+        self.transformer_blocks = nn.ModuleList([
+            TransformerBlock(
+                d_model,
+                num_heads,
+                d_ff,
+                rope_theta,
+                max_seq_length,
+                device,
+                dtype
+            )
+            for _ in range(num_layers)
+        ])
+        self.rmsnorm = RMSNorm(d_model,device=device,dtype = dtype)
+        self.outputlayer = Linear(d_model,vocab_size,device=device,dtype=dtype)
+    def forward(self,token_ids:torch.Tensor):
+        x = self.embedding(token_ids)
+        for block in self.transformer_blocks:
+            x = block(x)
+        result = self.outputlayer(self.rmsnorm(x))
+        return result
+    def change_weights(self,weights:dict):
+        
+        embedding_weights = weights['token_embeddings.weight']
+        rms_weights = weights['ln_final.weight']
+        outputlayer_weights = weights['lm_head.weight']
+        self.embedding.change_weights(embedding_weights)
+        self.rmsnorm.change_weights(rms_weights)
+        self.outputlayer.change_weights(outputlayer_weights)
+        for layer,block in enumerate(self.transformer_blocks):
+            layer_weights = dict()
+            layer_weights['attn.q_proj.weight'] = weights[f'layers.{layer}.attn.q_proj.weight']
+            layer_weights['attn.k_proj.weight'] = weights[f'layers.{layer}.attn.k_proj.weight']
+            layer_weights['attn.v_proj.weight'] = weights[f'layers.{layer}.attn.v_proj.weight']
+            layer_weights['attn.output_proj.weight'] = weights[f'layers.{layer}.attn.output_proj.weight']
+            layer_weights['ln1.weight']= weights[f'layers.{layer}.ln1.weight']
+            layer_weights['ln2.weight']= weights[f'layers.{layer}.ln2.weight']
+            layer_weights['ffn.w1.weight']= weights[f'layers.{layer}.ffn.w1.weight']
+            layer_weights['ffn.w2.weight']= weights[f'layers.{layer}.ffn.w2.weight']
+            layer_weights['ffn.w3.weight']= weights[f'layers.{layer}.ffn.w3.weight']    
+            block.change_weights(layer_weights)

@@ -283,8 +283,10 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    transformerblock = cs336_basics.transformer.TransformerBlock(d_model=d_model,num_heads=num_heads,d_ff=d_ff,theta=theta,max_seq_length=max_seq_len)
-    # tranformerblock.load_state_dict(weights)
+    transformerblock = cs336_basics.transformer.TransformerBlock(d_model=d_model,
+                                                                 num_heads=num_heads,
+                                                                 d_ff=d_ff,theta=theta,
+                                                                 max_seq_length=max_seq_len)
     transformerblock.change_weights(weights)
     return transformerblock(in_features)
 
@@ -367,7 +369,16 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    transformer = cs336_basics.transformer.TransformerLM(vocab_size,
+        context_length,
+        d_model,
+        num_layers,
+        num_heads,
+        d_ff,
+        rope_theta)
+    transformer.change_weights(weights)
+    return transformer(in_indices)
+    
 
 
 def run_rmsnorm(
