@@ -8,7 +8,7 @@ import numpy.typing as npt
 import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
-import cs336_basics.bpe, cs336_basics.tokenizer, cs336_basics.utils
+import cs336_basics.bpe, cs336_basics.tokenizer, cs336_basics.utils,cs336_basics.transformer
 
 def run_linear(
     d_in: int,
@@ -185,7 +185,9 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    rMHA = cs336_basics.utils.Multihead_Self_Attention(d_model=d_model, num_heads= num_heads,max_seq_length=max_seq_len,theta=theta,device=in_features.device)
+    rMHA.change_weights(q_proj_weight,k_proj_weight,v_proj_weight,o_proj_weight)
+    return rMHA(in_features,token_positons=token_positions)
 
 
 def run_rope(
@@ -281,8 +283,10 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
-
+    transformerblock = cs336_basics.transformer.TransformerBlock(d_model=d_model,num_heads=num_heads,d_ff=d_ff,theta=theta,max_seq_length=max_seq_len)
+    # tranformerblock.load_state_dict(weights)
+    transformerblock.change_weights(weights)
+    return transformerblock(in_features)
 
 def run_transformer_lm(
     vocab_size: int,

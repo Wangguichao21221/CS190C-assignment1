@@ -107,6 +107,8 @@ class RoPE(nn.Module):
     """
     Process an input tensor of shape (...,seq_len,d_k) and return a tensor of the same shape.
     """
+    print(f"RoPE input shape: {x.shape}")
+    print(f"RoPE token positions shape: {token_positions.shape}")
     x_splited = x.reshape(*x.shape[:-1], self.d_k//2, 2)
     cos_chunk = self.cos_table[:, token_positions, :]
     sin_chunk = self.sin_table[:, token_positions, :]
@@ -118,28 +120,37 @@ class RoPE(nn.Module):
     x_rotated = stacked_x.reshape(*stacked_x.shape[:-2], self.d_k)
     return x_rotated
 def scaled_dot_product_attention(
-    Q: Float[torch.Tensor, " ... queries d_k"],
-    K: Float[torch.Tensor, " ... keys d_k"],
-    V: Float[torch.Tensor, " ... values d_v"],
-    mask: Bool[torch.Tensor, " ... queries keys"] | None = None,):
+    Q,
+    K,
+    V,
+    mask=None,):
   """
-  Q:(batch_size, ..., seq_len_q, d_k)
-  K:(batch_size, ..., seq_len_k, d_k)
-  V:(batch_size, ..., seq_len_k, d_v)
-  mask:(seq_len_q, seq_len_k)
+  Q:(batch, heads, seq_len_q, d_k)
+  K:(batch, heads, seq_len_k, d_k)
+  V:(batch, heads, seq_len_k, d_v)
+  mask: boolean tensor. True=allow, False=block
+        accepted shapes:
+          (seq_q, seq_k) -> broadcast to (batch, heads, seq_q, seq_k)
   """
   d_k = Q.shape[-1]
   QKT = Q @ K.transpose(-1, -2)
-  attention_scores = QKT / math.sqrt(d_k)  
+  attention_scores = QKT / math.sqrt(d_k)
   
   if mask is not None:
-      mask = mask.reshape_as(attention_scores)
-      mask = torch.where(
+      mask = mask.to(torch.bool)
+      # expand (seq_q, seq_k) to (1, 1, seq_q, seq_k)
+      if mask.dim() == 2:
+          mask = mask.unsqueeze(0).unsqueeze(0)
+      # expand to match attention_scores shape: (batch, heads, seq_q, seq_k)
+      mask = mask.expand(attention_scores.shape)
+      mask = mask.to(device=Q.device)
+      # where mask is True keep 0, where False set -inf
+      additive = torch.where(
           mask,
           torch.tensor(0.0, device=Q.device),
-          torch.tensor(float('-inf'), device=Q.device)  
+          torch.tensor(float('-inf'), device=Q.device)
       )
-      attention_scores = attention_scores + mask
+      attention_scores = attention_scores + additive
 
   attention_weights = softmax(attention_scores, dim=-1)
   output = attention_weights @ V
@@ -150,8 +161,8 @@ class Multihead_Self_Attention(nn.Module):
     super().__init__()
     self.d_model = d_model
     self.num_heads = num_heads
-    self.d_k = d_model/num_heads
-    self.d_v = d_model/num_heads
+    self.d_k = d_model//num_heads
+    self.d_v = d_model//num_heads
     self.max_seq_length = max_seq_length
     self.theta = theta
     self.token_positons = None
@@ -159,7 +170,7 @@ class Multihead_Self_Attention(nn.Module):
     self.K_proj = Linear(d_model,self.d_k*self.num_heads,device=device)
     self.V_proj = Linear(d_model,self.d_v*self.num_heads,device=device)
     self.O_proj = Linear(self.d_v*self.num_heads,d_model,device=device)
-    self.attention_func = scaled_dot_product_attention()
+    self.attention_func = scaled_dot_product_attention
     if max_seq_length is not None and self.theta is not None:
       self.rope = RoPE(theta=theta,d_k=self.d_k,max_seq_len=max_seq_length,device=device)
     else:
@@ -173,6 +184,17 @@ class Multihead_Self_Attention(nn.Module):
     K=K.reshape(batch_size,seq_len,self.num_heads,self.d_k).transpose(1,2)
     V= self.V_proj(x)
     V=V.reshape(batch_size,seq_len,self.num_heads,self.d_v).transpose(1,2)
-    if self.rope is not None:
+    if self.rope is not None and token_positons is not None:
       self.token_positons = token_positons
       Q= self.rope(Q,self.token_positons)
+      K= self.rope(K,self.token_positons)
+    mask = torch.tril(torch.ones((seq_len, seq_len), dtype=torch.bool, device=x.device))
+    attention_output = self.attention_func(Q,K,V,mask=mask)
+    attention_output = attention_output.transpose(1,2).contiguous().reshape(batch_size,seq_len,self.d_v*self.num_heads)
+    output = self.O_proj(attention_output)
+    return output
+  def change_weights(self,Q_proj_weights,K_proj_weights,V_proj_weights,O_proj_weights):
+    self.Q_proj.change_weights(Q_proj_weights)
+    self.K_proj.change_weights(K_proj_weights)
+    self.V_proj.change_weights(V_proj_weights)
+    self.O_proj.change_weights(O_proj_weights)
