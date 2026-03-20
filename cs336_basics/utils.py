@@ -83,6 +83,7 @@ def softmax(x: torch.Tensor, dim) -> torch.Tensor:
   x_shifted = x-maxexp
   softmax = torch.exp(x_shifted)/torch.sum(torch.exp(x_shifted),dim=dim,keepdim= True)
   return softmax
+
 class RoPE(nn.Module):
   def __init__(self,theta: float,d_k:int,max_seq_len:int,device=None):
     """
@@ -196,3 +197,14 @@ class Multihead_Self_Attention(nn.Module):
     self.K_proj.change_weights(K_proj_weights)
     self.V_proj.change_weights(V_proj_weights)
     self.O_proj.change_weights(O_proj_weights)
+def log_softmax(x):
+  max = torch.max(x, dim=-1, keepdim=True)[0]
+  return x - max - torch.log(torch.sum(torch.exp(x - max), dim=-1, keepdim=True))
+def cross_entropy(inputs:torch.Tensor,targets:torch.Tensor):
+  log_probs = log_softmax(inputs)
+  target_log_probs = log_probs[torch.arange(inputs.shape[0], device=inputs.device), targets]
+  return -target_log_probs.mean()
+def perplexity(inputs,targets):
+  mean_cross_entropy = cross_entropy(inputs,targets)
+  return torch.exp(mean_cross_entropy)
+  
