@@ -17,7 +17,6 @@ from .common import FIXTURES_PATH, gpt2_bytes_to_unicode
 VOCAB_PATH = FIXTURES_PATH / "gpt2_vocab.json"
 MERGES_PATH = FIXTURES_PATH / "gpt2_merges.txt"
 
-
 def memory_limit(max_mem):
     def decorator(f):
         def wrapper(*args, **kwargs):

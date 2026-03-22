@@ -2,6 +2,9 @@ import torch.nn as nn
 import torch
 import math
 from jaxtyping import Bool, Float, Int
+from collections.abc import Iterable
+from cs336_basics.tokenizer import Tokenizer
+import numpy as np
 class Linear(nn.Module):
   def __init__(self, in_features, out_features, device=None, dtype=None):
     """
@@ -207,4 +210,103 @@ def cross_entropy(inputs:torch.Tensor,targets:torch.Tensor):
 def perplexity(inputs,targets):
   mean_cross_entropy = cross_entropy(inputs,targets)
   return torch.exp(mean_cross_entropy)
-  
+class AdamW_Optimizer(torch.optim.Optimizer):
+  def __init__(self, parameters, lr: float, weight_decay: float, betas,eps):
+    param_groups = [
+      {
+        "params":parameters,
+        "lr": lr
+      }
+    ]
+    super(AdamW_Optimizer,self).__init__(param_groups,{})
+    self.weight_decay = weight_decay
+    self.beta1 = betas[0]
+    self.beta2 = betas[1]
+    self.eps = eps
+    for group in self.param_groups:
+      for param in group['params']:
+        self.state[param] = {
+          'm':torch.zeros_like(param.data),
+          'v':torch.zeros_like(param.data),
+          'step':torch.tensor(0.0,device = param.device)
+        }
+  def step(self):
+    for group in self.param_groups:
+      for p in group['params']:
+        if p.grad is None:
+          continue
+
+        grad = p.grad.data
+        state = self.state[p]
+        m,v,step = state['m'],state['v'], state['step']
+        if not isinstance(step,torch.Tensor):
+          step = torch.tensor(float(step),device= p.device)
+          state['step'] = self.step
+        current_lr = group.get('lr')
+        m = m*self.beta1+(1-self.beta1)*grad
+        v = v*self.beta2+(1-self.beta2)*(grad**2)
+        step = step+1
+        alpha_t = current_lr*(math.sqrt(1-self.beta2**step))/(1-self.beta1**step)
+        p.data = (p.data-alpha_t*(m/torch.sqrt(v)+self.eps))-current_lr*self.weight_decay*p.data
+        self.state[p]['m']=m
+        self.state[p]['v']=v
+        self.state[p]['step']=step
+def lr_cosine_scheduler(
+    it: int,
+    max_learning_rate: float,
+    min_learning_rate: float,
+    warmup_iters: int,
+    cosine_cycle_iters: int,
+):
+  if it < warmup_iters:
+    return (it/warmup_iters)*max_learning_rate
+  elif it > cosine_cycle_iters:
+    return min_learning_rate
+  else:
+    return min_learning_rate+0.5*(1+math.cos(((it-warmup_iters)/(cosine_cycle_iters-warmup_iters))*math.pi))*(max_learning_rate-min_learning_rate)
+def gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float):
+  grad_sum = None
+  l2norm = torch.sqrt(sum(p.grad.data.norm(2)**2 for p in parameters if p.grad is not None))
+  if l2norm>max_l2_norm:
+    clip_factor = max_l2_norm/(l2norm+1e-6)
+    for p in parameters:
+      if p.grad is not None:
+        p.grad.data = p.grad.data * clip_factor
+class Mmap():
+  def __init__(self,corpus_path,vocab_path, merge_path, special_tokens):
+    self.corpus_path = corpus_path
+    self.vocab_path = vocab_path
+    self.merge_path = merge_path
+    self.special_tokens = special_tokens
+  def save_as_memmap(self):
+      tokenizer = Tokenizer.from_files(self.vocab_path, self.merge_path, self.special_tokens)
+      buffer = []
+      chunk_num = 0
+      length = 0
+
+      with open(self.corpus_path) as f:
+          encoder = tokenizer.encode_iterable(f)
+          for id in encoder:
+              length += 1
+              buffer.append(id)
+              if len(buffer) >= self.chunk_size:
+                  self.save_by_chunks(buffer, self.chunk_size, chunk_num)
+                  chunk_num += 1
+                  buffer = []
+      if len(buffer) > 0:
+          self.save_by_chunks(buffer, len(buffer), chunk_num)
+          buffer = []
+
+      print(f"length of corpus in tokens:{length}")
+  def save_by_chunks(self, token_ids, buffer_len, chunk_num):
+    
+    fname = "../data/" + self.corpus_size + f"_chunks/encoded_tokens_chunk_{chunk_num}.dat"
+    dtype = np.int32
+    shape = (buffer_len,)
+
+    memmap_arr = np.memmap(fname, dtype=dtype, mode="w+", shape=shape)
+
+    memmap_arr[:] = token_ids[:]
+
+    memmap_arr.flush()
+
