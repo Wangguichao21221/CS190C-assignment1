@@ -250,7 +250,7 @@ class AdamW_Optimizer(torch.optim.Optimizer):
         v = v*self.beta2+(1-self.beta2)*(grad**2)
         step = step+1
         alpha_t = current_lr*(math.sqrt(1-self.beta2**step))/(1-self.beta1**step)
-        p.data = (p.data-alpha_t*(m/torch.sqrt(v)+self.eps))-current_lr*self.weight_decay*p.data
+        p.data = (p.data - alpha_t * (m / (torch.sqrt(v) + self.eps))) - current_lr * self.weight_decay * p.data
         self.state[p]['m']=m
         self.state[p]['v']=v
         self.state[p]['step']=step
@@ -306,14 +306,73 @@ class Mmap():
       print(f"length of corpus in tokens:{length}")
   def save_by_chunks(self, token_ids, buffer_len, chunk_num):
     chunk_dir = Path("./data") / f"{self.corpus_size}_chunks"
-
-    # 若目录存在，删除整个目录（包含所有历史 chunk）
-
-    # 重新创建空目录
     chunk_dir.mkdir(parents=True, exist_ok=True)
-
+    self.chunk_dir = chunk_dir
     fname = chunk_dir / f"encoded_tokens_chunk_{chunk_num}.dat"
     memmap_arr = np.memmap(str(fname), dtype=np.int32, mode="w+", shape=(buffer_len,))
     memmap_arr[:] = token_ids
     memmap_arr.flush()
+  def load_by_range(self, start_idx, end_idx):
+    chunk_size = self.chunk_size
+    start_chunk = start_idx // chunk_size
+    end_chunk = end_idx // chunk_size
+    idx_in_start = start_idx % chunk_size
+    idx_in_end = end_idx % chunk_size
 
+    token_ids = []
+    for chunk in range(start_chunk, end_chunk + 1):
+        fname = self.chunk_dir / f"encoded_tokens_chunk_{chunk}.dat"
+        dtype = np.int32
+        memmap_arr = np.memmap(fname, dtype=dtype, mode="r")
+        if start_chunk == end_chunk:
+            token_ids.extend(memmap_arr[idx_in_start:idx_in_end])
+        else:
+            if chunk == start_chunk:
+                token_ids.extend(memmap_arr[idx_in_start:])
+            elif chunk > start_chunk and chunk < end_chunk:
+                token_ids.extend(memmap_arr[:])
+            else:
+                token_ids.extend(memmap_arr[:idx_in_end])
+    return token_ids
+class Batch_Random_Sampler:
+  def __init__(self, mmap: Mmap = None):
+    self.mmap = mmap
+  def get_batch(self, bsz, seq_len, dataset_length, device=None):
+    max_start_idx = dataset_length - seq_len
+    start_indices = np.random.randint(0, max_start_idx, bsz)
+    x = np.array([range(i,i+seq_len) for i in start_indices], dtype=np.int64)
+    y = np.array([range(i+1,i+seq_len+1) for i in start_indices], dtype=np.int64)
+    x = torch.tensor(x, dtype=torch.long, device=device)
+    y = torch.tensor(y, dtype=torch.long, device=device)
+    return (x, y)
+  def get_batch_mmap(self, bsz, seq_len, dataset_length, device=None):
+    max_start_idx = dataset_length - seq_len
+    start_indices = np.random.randint(0, max_start_idx, bsz)
+    x = np.array([self.memmap_manager.load_by_range(i, i+seq_len) for i in start_indices], dtype=np.int64)
+    y = np.array([self.memmap_manager.load_by_range(i+1, i+seq_len+1) for i in start_indices], dtype=np.int64)
+    x = torch.tensor(x, dtype=torch.long, device=device)
+    y = torch.tensor(y, dtype=torch.long, device=device)
+    return (x, y)
+    
+class Checkpoint_Manager:
+  def save(self, model, optimizer, iteration, save_path):
+      os.makedirs(os.path.dirname(save_path), exist_ok=True)
+      state_model = model.state_dict()
+      state_optimizer = optimizer.state_dict()
+      checkpoint = {
+          "model": state_model,
+          "optimizer": state_optimizer,
+          "iteration": iteration
+      }
+      torch.save(checkpoint, save_path)
+  def load(self, src_path, model, optimizer=None):
+    checkpoint = torch.load(src_path)
+    state_model = checkpoint["model"]
+    if optimizer is not None:
+        print(f"optimizer is not none")
+        state_optimizer = checkpoint["optimizer"]
+    iteration = checkpoint["iteration"]
+    model.load_state_dict(state_model)
+    if optimizer is not None:
+        optimizer.load_state_dict(state_optimizer)
+    return iteration

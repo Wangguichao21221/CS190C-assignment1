@@ -416,7 +416,7 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
         Float[Tensor,"..."]: of with the same shape as `in_features` with the output of applying
         SiLU to each element.
     """
-    raise cs336_basics.utils.SiLU(in_features)
+    return cs336_basics.utils.SiLU(in_features)
 
 
 def run_get_batch(
@@ -439,8 +439,8 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
-    raise NotImplementedError
-
+    batch_sampler = cs336_basics.utils.Batch_Random_Sampler()
+    return batch_sampler.get_batch(batch_size,context_length,dataset_length=len(dataset),device=device)
 
 def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
     """
@@ -539,8 +539,8 @@ def run_save_checkpoint(
             we've completed.
         out (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialize the model, optimizer, and iteration to.
     """
-    raise NotImplementedError
-
+    check_point_manager = cs336_basics.utils.Checkpoint_Manager()
+    check_point_manager.save(model,optimizer,iteration,out)
 
 def run_load_checkpoint(
     src: str | os.PathLike | BinaryIO | IO[bytes],
@@ -560,7 +560,8 @@ def run_load_checkpoint(
     Returns:
         int: the previously-serialized number of iterations.
     """
-    raise NotImplementedError
+    check_point_manager = cs336_basics.utils.Checkpoint_Manager()
+    return check_point_manager.load(src,model,optimizer)
 
 
 def get_tokenizer(
