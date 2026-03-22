@@ -5,6 +5,9 @@ from jaxtyping import Bool, Float, Int
 from collections.abc import Iterable
 from cs336_basics.tokenizer import Tokenizer
 import numpy as np
+from pathlib import Path
+import os
+import shutil
 class Linear(nn.Module):
   def __init__(self, in_features, out_features, device=None, dtype=None):
     """
@@ -273,18 +276,21 @@ def gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: flo
       if p.grad is not None:
         p.grad.data = p.grad.data * clip_factor
 class Mmap():
-  def __init__(self,corpus_path,vocab_path, merge_path, special_tokens):
+  def __init__(self,corpus_path,vocab_path, merge_path, special_tokens=None,chunk_size = 1024):
     self.corpus_path = corpus_path
     self.vocab_path = vocab_path
     self.merge_path = merge_path
     self.special_tokens = special_tokens
+    self.chunk_size = chunk_size
+    with open(self.corpus_path) as f:
+      self.corpus_size = Path(self.corpus_path).stat().st_size
   def save_as_memmap(self):
       tokenizer = Tokenizer.from_files(self.vocab_path, self.merge_path, self.special_tokens)
       buffer = []
       chunk_num = 0
       length = 0
 
-      with open(self.corpus_path) as f:
+      with open(self.corpus_path,encoding='utf-8') as f:
           encoder = tokenizer.encode_iterable(f)
           for id in encoder:
               length += 1
@@ -299,14 +305,15 @@ class Mmap():
 
       print(f"length of corpus in tokens:{length}")
   def save_by_chunks(self, token_ids, buffer_len, chunk_num):
-    
-    fname = "../data/" + self.corpus_size + f"_chunks/encoded_tokens_chunk_{chunk_num}.dat"
-    dtype = np.int32
-    shape = (buffer_len,)
+    chunk_dir = Path("./data") / f"{self.corpus_size}_chunks"
 
-    memmap_arr = np.memmap(fname, dtype=dtype, mode="w+", shape=shape)
+    # 若目录存在，删除整个目录（包含所有历史 chunk）
 
-    memmap_arr[:] = token_ids[:]
+    # 重新创建空目录
+    chunk_dir.mkdir(parents=True, exist_ok=True)
 
+    fname = chunk_dir / f"encoded_tokens_chunk_{chunk_num}.dat"
+    memmap_arr = np.memmap(str(fname), dtype=np.int32, mode="w+", shape=(buffer_len,))
+    memmap_arr[:] = token_ids
     memmap_arr.flush()
 

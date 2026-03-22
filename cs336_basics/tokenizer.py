@@ -76,13 +76,13 @@ class Tokenizer:
     #   i+=1
     #   if i>10:
     #     break
-    
+  @classmethod
   def from_files(cls, vocab_filepath,merges_filepath,special_tokens=None):
     gpt2_byte_decoder = {v: k for k, v in gpt2_bytes_to_unicode().items()}
-    with open(vocab_filepath) as vocab_f:
+    with open(vocab_filepath,encoding='utf-8') as vocab_f:
         gpt2_vocab = json.load(vocab_f)
     gpt2_bpe_merges = []
-    with open(merges_filepath) as f:
+    with open(merges_filepath,encoding='utf-8') as f:
         for line in f:
             cleaned_line = line.rstrip()
             if cleaned_line and len(cleaned_line.split(" ")) == 2:
