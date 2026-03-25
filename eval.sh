@@ -1,0 +1,16 @@
+uv run eval.py \
+  --d_model 512 \
+  --num_heads 8 \
+  --d_ff 1344 \
+  --vocab_size 50257 \
+  --num_layers 8 \
+  --max_seq_length 512 \
+  --vocab_path ./tests/fixtures/gpt2_vocab.json \
+  --merges_path ./tests/fixtures/gpt2_merges.txt \
+  --special_tokens "<|endoftext|>" \
+  --checkpoint_path ./checkpoints/checkpoint.pt \
+  --theta 100000 \
+  --prompt_file ./data/prompt.txt \
+  --max_gen_len 100 \
+  --temperature 0.5 \
+  --repeat_penalty 20\

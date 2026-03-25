@@ -114,6 +114,8 @@ class RoPE(nn.Module):
     """
     Process an input tensor of shape (...,seq_len,d_k) and return a tensor of the same shape.
     """
+    if token_positions.dim() == 2:
+      token_positions = token_positions[0]
     x_splited = x.reshape(*x.shape[:-1], self.d_k//2, 2)
     cos_chunk = self.cos_table[:, token_positions, :]
     sin_chunk = self.sin_table[:, token_positions, :]
@@ -206,12 +208,19 @@ class Multihead_Self_Attention(nn.Module):
 def log_softmax(x):
   max = torch.max(x, dim=-1, keepdim=True)[0]
   return x - max - torch.log(torch.sum(torch.exp(x - max), dim=-1, keepdim=True))
-def cross_entropy(inputs:torch.Tensor,targets:torch.Tensor):
-  log_probs = log_softmax(inputs)
-  target_log_probs = log_probs[torch.arange(inputs.shape[0], device=inputs.device), targets]
-  return -target_log_probs.mean()
+class CrossEntropyLoss:
+  def __init__(self):
+    pass
+  def __call__(self,inputs,targets):
+    log_probs = log_softmax(inputs)
+    if targets.dtype != torch.long:
+      targets = targets.long()
+    # Handle logits shaped (batch, vocab) and (batch, seq, vocab).
+    target_log_probs = torch.gather(log_probs, dim=-1, index=targets.unsqueeze(-1)).squeeze(-1)
+    return -target_log_probs.mean()
+
 def perplexity(inputs,targets):
-  mean_cross_entropy = cross_entropy(inputs,targets)
+  mean_cross_entropy = CrossEntropyLoss()(inputs,targets)
   return torch.exp(mean_cross_entropy)
 class AdamW_Optimizer(torch.optim.Optimizer):
   def __init__(self, parameters, lr: float, weight_decay: float, betas,eps):
@@ -254,27 +263,26 @@ class AdamW_Optimizer(torch.optim.Optimizer):
         self.state[p]['m']=m
         self.state[p]['v']=v
         self.state[p]['step']=step
-def lr_cosine_scheduler(
-    it: int,
-    max_learning_rate: float,
-    min_learning_rate: float,
-    warmup_iters: int,
-    cosine_cycle_iters: int,
-):
-  if it < warmup_iters:
-    return (it/warmup_iters)*max_learning_rate
-  elif it > cosine_cycle_iters:
-    return min_learning_rate
-  else:
-    return min_learning_rate+0.5*(1+math.cos(((it-warmup_iters)/(cosine_cycle_iters-warmup_iters))*math.pi))*(max_learning_rate-min_learning_rate)
-def gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float):
-  grad_sum = None
-  l2norm = torch.sqrt(sum(p.grad.data.norm(2)**2 for p in parameters if p.grad is not None))
-  if l2norm>max_l2_norm:
-    clip_factor = max_l2_norm/(l2norm+1e-6)
-    for p in parameters:
-      if p.grad is not None:
-        p.grad.data = p.grad.data * clip_factor
+class lr_cosine_scheduler:
+  def get_lr(self,it,lr_max,lr_min,warmup_iters,cosine_cycle_iters):
+    if it < warmup_iters:
+      return (it/warmup_iters)*lr_max
+    elif it > cosine_cycle_iters:
+      return lr_min
+    else:
+      return lr_min+0.5*(1+math.cos(((it-warmup_iters)/(cosine_cycle_iters-warmup_iters))*math.pi))*(lr_max-lr_min)
+class grad_clipper:
+  def __init__(self,max_norm):
+    self.max_norm = max_norm
+  def __call__(self,parameters):
+    grad_sum = None
+    l2norm = torch.sqrt(sum(p.grad.data.norm(2)**2 for p in parameters if p.grad is not None))
+    if l2norm>self.max_norm:
+      clip_factor = self.max_norm/(l2norm+1e-6)
+      for p in parameters:
+        if p.grad is not None:
+          p.grad.data = p.grad.data * clip_factor
+
 class Mmap():
   def __init__(self,corpus_path,vocab_path, merge_path, special_tokens=None,chunk_size = 1024):
     self.corpus_path = corpus_path
@@ -284,6 +292,9 @@ class Mmap():
     self.chunk_size = chunk_size
     with open(self.corpus_path) as f:
       self.corpus_size = Path(self.corpus_path).stat().st_size
+    chunk_dir = Path("./data") / f"{os.path.basename(self.corpus_path)}_chunks"
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    self.chunk_dir = chunk_dir
   def save_as_memmap(self):
       tokenizer = Tokenizer.from_files(self.vocab_path, self.merge_path, self.special_tokens)
       buffer = []
@@ -302,13 +313,10 @@ class Mmap():
       if len(buffer) > 0:
           self.save_by_chunks(buffer, len(buffer), chunk_num)
           buffer = []
-
       print(f"length of corpus in tokens:{length}")
   def save_by_chunks(self, token_ids, buffer_len, chunk_num):
-    chunk_dir = Path("./data") / f"{self.corpus_size}_chunks"
-    chunk_dir.mkdir(parents=True, exist_ok=True)
-    self.chunk_dir = chunk_dir
-    fname = chunk_dir / f"encoded_tokens_chunk_{chunk_num}.dat"
+
+    fname = self.chunk_dir / f"encoded_tokens_chunk_{chunk_num}.dat"
     memmap_arr = np.memmap(str(fname), dtype=np.int32, mode="w+", shape=(buffer_len,))
     memmap_arr[:] = token_ids
     memmap_arr.flush()
@@ -348,8 +356,8 @@ class Batch_Random_Sampler:
   def get_batch_mmap(self, bsz, seq_len, dataset_length, device=None):
     max_start_idx = dataset_length - seq_len
     start_indices = np.random.randint(0, max_start_idx, bsz)
-    x = np.array([self.memmap_manager.load_by_range(i, i+seq_len) for i in start_indices], dtype=np.int64)
-    y = np.array([self.memmap_manager.load_by_range(i+1, i+seq_len+1) for i in start_indices], dtype=np.int64)
+    x = np.array([self.mmap.load_by_range(i, i+seq_len) for i in start_indices], dtype=np.int64)
+    y = np.array([self.mmap.load_by_range(i+1, i+seq_len+1) for i in start_indices], dtype=np.int64)
     x = torch.tensor(x, dtype=torch.long, device=device)
     y = torch.tensor(y, dtype=torch.long, device=device)
     return (x, y)

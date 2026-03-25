@@ -1,7 +1,9 @@
 import regex as re
 import os
 import multiprocessing
-
+import json
+from cs336_basics.tokenizer import gpt2_bytes_to_unicode
+from cs336_basics.tokenizer import gpt2_bytes_to_unicode
 def find_chunk_boundaries(
     file,
     desired_num_chunks,
@@ -113,7 +115,9 @@ def train_bpe(
     vocab_size: int,
     special_tokens: list[str],
     num_process=8,
-    **kwargs,
+    vacab_output_path="./data/vocab.json",
+    merges_output_path="./data/merges.txt",
+    save = False,
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
 
     with open(input_path, mode='rb') as f:
@@ -123,6 +127,23 @@ def train_bpe(
     chunks = chunk_text(corpus, boundaries, special_tokens)
     pretokens = pretokenize_parallel(chunks, num_process, special_tokens)
     vocab, merges = bpe(pretokens, vocab_size)
+    if save:
+      byte_to_unicode = gpt2_bytes_to_unicode()
+      token_to_index = {}
+
+      for index in range(vocab_size):
+          token_bytes = vocab[index]
+          token_str = "".join(byte_to_unicode[b] for b in token_bytes)
+          token_to_index[token_str] = index
+
+      with open(vacab_output_path, mode="w", encoding="utf-8") as vocab_file:
+          json.dump(token_to_index, vocab_file, ensure_ascii=True, indent=2)
+      with open(merges_output_path, mode='w', encoding='utf-8') as merges_file:
+          for pair in merges:
+            token1_str = "".join(byte_to_unicode[b] for b in pair[0])
+            token2_str = "".join(byte_to_unicode[b] for b in pair[1])
+            # Keep GPT-2 style merge format: token1 + space + token2.
+            merges_file.write(f"{token1_str} {token2_str}\n")
     return vocab, merges
 def bpe(pretokens,vocab_size):
   merges = []

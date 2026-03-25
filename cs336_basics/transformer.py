@@ -10,7 +10,7 @@ class TransformerBlock(nn.Module):
         self.FFN = SwiGLU(d_model,d_ff,device=device,dtype = dtype)
     def forward(self,x:torch.Tensor):
         seq_len = x.shape[1]
-        token_positions = torch.arange(seq_len).unsqueeze(0).expand(x.shape[0], -1).to(x.device)
+        token_positions = torch.arange(seq_len, device=x.device)
 
         x = x + self.MHA(self.rmsnorm1(x),token_positions)
         x = x + self.FFN(self.rmsnorm2(x))
